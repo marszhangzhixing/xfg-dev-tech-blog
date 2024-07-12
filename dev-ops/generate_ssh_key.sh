@@ -1,30 +1,42 @@
-#!/bin/bash
+name: Deploy Blog Pages
 
-# 设置默认的密钥文件路径
-KEY_PATH="$HOME/.ssh/id_rsa"
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
-# 检查是否已经存在密钥文件
-if [ -f "$KEY_PATH" ]; then
-    echo "SSH 密钥文件 $KEY_PATH 已经存在。"
-    read -p "是否覆盖现有密钥？(y/n): " choice
-    if [ "$choice" != "y" ]; then
-        echo "操作已取消。"
-        exit 1
-    fi
-fi
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          persist-credentials: false
 
-# 生成新的 SSH 密钥对
-ssh-keygen -t rsa -b 4096 -f "$KEY_PATH" -N ""
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18.16.0'
 
-# 确保 .ssh 目录和 authorized_keys 文件存在
-mkdir -p "$HOME/.ssh"
-touch "$HOME/.ssh/authorized_keys"
+      - name: Install dependencies
+        run: npm install
 
-# 将公钥添加到 authorized_keys 文件中
-cat "${KEY_PATH}.pub" >> "$HOME/.ssh/authorized_keys"
+      - name: Build
+        run: npm run docs:build
 
-# 设置正确的权限
-chmod 700 "$HOME/.ssh"
-chmod 600 "$HOME/.ssh/authorized_keys"
-
-echo "新的 SSH 密钥对已生成，并添加到 authorized_keys 文件中。"
+      - name: Deploy to Nginx Server
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          REMOTE_PATH: ${{ secrets.REMOTE_PATH }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
+          #scp -r ./docs/.vuepress/dist/* $SSH_USERNAME@$SSH_HOST:$REMOTE_PATH
+          sshpass -p $SSH_PASSWORD scp -r ./dev-ops/nginx/html/* root@$SSH_HOST:$REMOTE_PATH
